@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 1
+names: ['hoops']
+
+roboflow:
+  workspace: nuhinsalamun7-gmail-com
+  project: basketball-hoop-7kdks-dhgsg
+  version: 2
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/nuhinsalamun7-gmail-com/basketball-hoop-7kdks-dhgsg/dataset/2

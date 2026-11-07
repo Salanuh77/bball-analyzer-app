@@ -1,0 +1,47 @@
+:root {
+  --font-display:
+    Spline Sans, Inter, ui-sans-serif, system-ui, sans-serif, Apple Color Emoji, Segoe UI Emoji,
+    Segoe UI Symbol, Noto Color Emoji;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace;
+  --font-rounded: 'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif;
+  --font-serif: Georgia, 'Times New Roman', serif;
+}
+
+.crescent-moon {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  /* Makes the base element a circle */
+  background-color: transparent;
+
+  /* The shadow acts as the visible moon crescent */
+  box-shadow: 25px 10px 0 0 #f6e58d;
+}
+
+.sun {
+  width: 120px;
+  height: 120px;
+
+  /* Creates the vibrant sun gradient */
+  background: linear-gradient(to bottom, #ffea47, #ff9800);
+
+  /* Turns the square div into a perfect circle */
+  border-radius: 50%;
+
+  /* Generates a soft, atmospheric sun glow effect */
+  box-shadow: 0 0 40px 20px rgba(255, 215, 0, 0.6);
+}
+
+.switch-theme {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 10px;
+  background-color: white;
+  color: #fff;
+}
+
+.theme-content {
+  padding: 20px;
+}
