@@ -165,7 +165,16 @@ async def annotated_vid(vids: UploadFile = File(...)):
     if (cap.isOpened()== False):
         print("Error opening video stream or file")
 
+    while cap.isOpened():
+
+        ret, frame = cap.read()
+
+        if ret == True:
+            cv2.imshow('Frame',frame)
     
+        else:
+            break
+
 
 @app.post("/report")
 async def analysis_report():
