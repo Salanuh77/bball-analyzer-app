@@ -15,11 +15,11 @@ class MakeOrMissShot(Enum):
     MAKE = 0
     MISS = 1
 
-if __name__ == "__main__":
-    hoop_model = YOLO("detect/train-6/weights/best.pt")
-    ball_model = YOLO("yolov8n.pt")
-    model = YOLO("yolo26n-pose.pt")
+hoop_model = YOLO("detect/train-6/weights/best.pt")
+ball_model = YOLO("yolov8n.pt")
+model = YOLO("yolo26n-pose.pt")
 
+if __name__ == "__main__":
     pose_results = model("test.mp4", stream=True)
     hoop_results = hoop_model("test.mp4", stream=True)
     ball_results = ball_model("test.mp4", stream=True)
@@ -177,17 +177,13 @@ def hoop_center(box):
 
     return hoop_x, hoop_y
 
-def dist_bw_ball_and_hoop(person, hoop_x, hoop_y):
+def dist_bw_ball_and_hoop(person, hoop_x):
     left_ankle = person[15]
     right_ankle = person[16]
 
     player_x = (left_ankle[0] + right_ankle[0]) / 2
-    player_y = (left_ankle[1] + right_ankle[1]) / 2
 
-    distance = math.hypot(
-        hoop_x - player_x,
-        hoop_y - player_y
-    )
+    distance = hoop_x - player_x
 
     return distance
 
@@ -229,3 +225,13 @@ def shot_made(release_frame, ball_pos_dict, hoop_pos_dict):
                 return True
 
     return False
+
+def pixels_to_meters(distance_pixels, hoop_y, ground_y):
+    hoop_height_pixels = ground_y - hoop_y
+
+    if hoop_height_pixels <= 0:
+        raise ValueError("Invalid hoop-to-ground pixel height")
+
+    meters_per_pixel = 3.048 / hoop_height_pixels
+
+    return distance_pixels * meters_per_pixel

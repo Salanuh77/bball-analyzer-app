@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 import analyze
 import math
 import asyncio
+import cv2
 
 app = FastAPI()
 
@@ -82,7 +83,9 @@ async def analyze_videos(vids: UploadFile = File(...)):
             print("Class:", name, "Confidence:", confidence)
 
             if name == "hoops":
-                hoop_pos_dict[frame_num] = analyze.hoop_center(box)
+                x, y, w, h = box.xywh[0].tolist()
+                hoop_pos_dict[frame_num] = (x, y, w, h)
+
 
     for frame_num, result in enumerate(ball_results):
         for box in result.boxes:
@@ -107,10 +110,10 @@ async def analyze_videos(vids: UploadFile = File(...)):
         key=lambda frame: abs(frame - release_frame)
     )
 
-    hoop_x, hoop_y = hoop_pos_dict[closest_frame]
+    hoop_x, hoop_y = hoop_pos_dict[closest_frame][:2]
 
     person = frame_dict[release_frame].keypoints.xy[0]
-    dist = analyze.dist_bw_ball_and_hoop(person, hoop_x, hoop_y) 
+    dist = analyze.dist_bw_ball_and_hoop(person, hoop_x) 
 
     result = frame_dict[release_frame]
     person_box = result.boxes.xyxy[0]
@@ -125,25 +128,44 @@ async def analyze_videos(vids: UploadFile = File(...)):
     )
     hoop_height_pixels = ground_y - hoop_y
     meters_per_pixel = 3.048 / hoop_height_pixels
+    distance_m = dist * meters_per_pixel
     release_height_m = release_height_pixels * meters_per_pixel
 
-    optimal_angle = analyze.optimal_shooting_arc(dist, release_height_m)
+    optimal_angle = analyze.optimal_shooting_arc(distance_m, release_height_m)
 
     angle = analyze.ball_trajectory_arc(release_frame, ball_pos_dict)
+    shot_made = analyze.shot_made(release_frame, ball_pos_dict, hoop_pos_dict)
 
     print("Release frame:", release_frame)
     print("Release position:", (release_x, release_y))
     print("Release angle:", abs(angle))
-    print("Distance:", dist)
+    print("Distance:", distance_m)
     print("Optimal angle:", optimal_angle)
 
     return {
         "release_frame": release_frame,
         "release_position": [release_x, release_y],
         "release_angle": abs(angle),
-        "distance_pixels": float(dist),
+        "distance_meters": float(distance_m),
         "optimal_angle": float(optimal_angle),
+        "shot_made": shot_made,
     }
+
+@app.post("/annotated-vid")
+async def annotated_vid(vids: UploadFile = File(...)):
+    if not vids.content_type.startswith("video/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File uploaded is not a video. Got: {vids.content_type}")
+
+    with open("uploaded_video.mp4", "wb") as buffer:
+        shutil.copyfileobj(vids.file, buffer)
+
+    cap = cv2.VideoCapture("uploaded_video.mp4")
+
+    if (cap.isOpened()== False):
+        print("Error opening video stream or file")
+
+    
 
 @app.post("/report")
 async def analysis_report():

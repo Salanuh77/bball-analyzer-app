@@ -2,7 +2,7 @@ import requests
 
 print("Starting test...")
 
-url = "http://127.0.0.1:8001/videos"
+url = "http://127.0.0.1:8080/videos"
 
 with open("single_three_point.mp4", "rb") as video:
     print("Sending video...")
