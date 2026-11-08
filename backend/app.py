@@ -14,6 +14,21 @@ class User(BaseModel):
     curVid: str
     vids: list[str]
 
+POSE_PAIRS = [
+    (5, 6),    # Shoulders
+    (5, 7),    # Left upper arm
+    (7, 9),    # Left forearm
+    (6, 8),    # Right upper arm
+    (8, 10),   # Right forearm
+    (5, 11),   # Left torso
+    (6, 12),   # Right torso
+    (11, 12),  # Hips
+    (11, 13),  # Left thigh
+    (13, 15),  # Left shin
+    (12, 14),  # Right thigh
+    (14, 16)   # Right shin
+]
+
 if __name__ == "__main__":
     pose_results = analyze.model("uploaded_video.mp4", stream=True)
     hoop_results = analyze.hoop_model("uploaded_video.mp4",
@@ -174,7 +189,12 @@ async def annotated_vid(vids: UploadFile = File(...)):
         if ret == True:
 
             for frame_num, result in enumerate(pose_results):
-                pass
+                for pair in POSE_PAIRS:
+                    partA = pair[0]
+                    partB = pair[1]
+
+                if result.keypoints.xy[partA] and result.keypoints.xy[partB]:
+                    cv2.line(pose_results[frame_num], result.keypoints.xy[partA], result.keypoints.xy[partB], (0, 255, 0), 3)
     
         else:
             break
