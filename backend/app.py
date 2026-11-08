@@ -14,6 +14,15 @@ class User(BaseModel):
     curVid: str
     vids: list[str]
 
+if __name__ == "__main__":
+    pose_results = analyze.model("uploaded_video.mp4", stream=True)
+    hoop_results = analyze.hoop_model("uploaded_video.mp4",
+        stream=True,
+        imgsz=1280,
+        conf=0.05
+    )
+    ball_results = analyze.ball_model("uploaded_video.mp4", stream=True)
+
 @app.post("/videos") 
 async def analyze_videos(vids: UploadFile = File(...)):
     if not vids.content_type.startswith("video/"):
@@ -23,13 +32,6 @@ async def analyze_videos(vids: UploadFile = File(...)):
     with open("uploaded_video.mp4", "wb") as buffer:
         shutil.copyfileobj(vids.file, buffer)
 
-    pose_results = analyze.model("uploaded_video.mp4", stream=True)
-    hoop_results = analyze.hoop_model("uploaded_video.mp4",
-        stream=True,
-        imgsz=1280,
-        conf=0.05
-    )
-    ball_results = analyze.ball_model("uploaded_video.mp4", stream=True)
     person_pos_dict = {}
     hoop_pos_dict = {}
 
@@ -170,7 +172,9 @@ async def annotated_vid(vids: UploadFile = File(...)):
         ret, frame = cap.read()
 
         if ret == True:
-            cv2.imshow('Frame',frame)
+
+            for frame_num, result in enumerate(pose_results):
+                pass
     
         else:
             break
