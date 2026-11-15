@@ -121,7 +121,7 @@ def find_release_frame(ball_pos_dict, wrist_pos_dict, shoulder_pos_dict):
     return None
 
 # shooting hand needs to be higher than guide hand when releasing (standard technique) or else this won't work as intended
-def shooting_hand(release_frame):
+def shooting_hand(release_frame, wrist_pos_dict):
     return ShootingHand.LEFT if wrist_pos_dict[release_frame]["left"][1] < wrist_pos_dict[release_frame]["right"][1] else ShootingHand.RIGHT
 
 
@@ -235,3 +235,58 @@ def pixels_to_meters(distance_pixels, hoop_y, ground_y):
     meters_per_pixel = 3.048 / hoop_height_pixels
 
     return distance_pixels * meters_per_pixel
+
+def find_shooting_hand(release_frame, ball_pos_dict, wrist_pos_dict):
+    return ShootingHand.LEFT if distance(wrist_pos_dict[release_frame]["left"], ball_pos_dict[release_frame]) < distance(wrist_pos_dict[release_frame]["right"], ball_pos_dict[release_frame]) else ShootingHand.RIGHT
+
+def elbow_angle(release_keypt, shooting_hand):
+
+    if release_keypt is None or len(release_keypt) == 0:
+        return None
+    for partA, partB in ((6, 8), (8, 10), (5, 7), (7, 9)):
+        match shooting_hand:
+            case ShootingHand.RIGHT:
+                if (partA, partB) == (6, 8):  # Right shoulder -> elbow
+                    pointA = tuple(map(int, release_keypt[partA]))
+                    pointB = tuple(map(int, release_keypt[partB]))
+
+                elif (partA, partB) == (8, 10):  # Right elbow -> wrist
+                    pointAs = tuple(map(int, release_keypt[partA]))
+                    pointBs = tuple(map(int, release_keypt[partB]))
+            case ShootingHand.LEFT:
+                if (partA, partB) == (5, 7):  # Left shoulder -> elbow
+                    pointA = tuple(map(int, release_keypt[partA]))
+                    pointB = tuple(map(int, release_keypt[partB]))
+
+                elif (partA, partB) == (7, 9):  # Left elbow -> wrist
+                    pointAs = tuple(map(int, release_keypt[partA]))
+                    pointBs = tuple(map(int, release_keypt[partB]))
+
+    # Vector from elbow to shoulder
+    vectorA = (pointA[0] - pointB[0],
+            pointA[1] - pointB[1])
+
+    # Vector from elbow to wrist
+    vectorB = (pointBs[0] - pointAs[0],
+            pointBs[1] - pointAs[1])
+
+    dot = vectorA[0] * vectorB[0] + vectorA[1] * vectorB[1]
+
+    magA = math.hypot(*vectorA)
+    magB = math.hypot(*vectorB)
+
+    if magA == 0 or magB == 0:
+        return None
+
+    cos_theta = dot / (magA * magB)
+
+    angle = math.degrees(
+        math.acos(max(-1, min(1, cos_theta)))
+    )
+
+    return angle
+    
+
+
+ 
+
