@@ -5,8 +5,21 @@ import analyze
 import math
 import asyncio
 import cv2
+import os
+import requests
 
 app = FastAPI()
+
+release_frame = None
+
+object_dict = {}
+frame_dict = {}
+ball_pos_dict = {}
+wrist_pos_dict = {}
+arm_pos_dict = {}
+shoulder_pos_dict = {}
+person_pos_dict = {}
+hoop_pos_dict = {}
 
 class User(BaseModel):
     id: int
@@ -29,17 +42,9 @@ POSE_PAIRS = [
     (14, 16)   # Right shin
 ]
 
-if __name__ == "__main__":
-    pose_results = analyze.model("uploaded_video.mp4", stream=True)
-    hoop_results = analyze.hoop_model("uploaded_video.mp4",
-        stream=True,
-        imgsz=1280,
-        conf=0.05
-    )
-    ball_results = analyze.ball_model("uploaded_video.mp4", stream=True)
-
 @app.post("/videos") 
 async def analyze_videos(vids: UploadFile = File(...)):
+    global release_frame
     if not vids.content_type.startswith("video/"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"File uploaded is not a video. Got: {vids.content_type}")
@@ -47,16 +52,20 @@ async def analyze_videos(vids: UploadFile = File(...)):
     with open("uploaded_video.mp4", "wb") as buffer:
         shutil.copyfileobj(vids.file, buffer)
 
-    person_pos_dict = {}
-    hoop_pos_dict = {}
+    print("Saved size:", os.path.getsize("uploaded_video.mp4"))
+    print("Uploaded filename:", vids.filename)
 
+    cap = cv2.VideoCapture("uploaded_video.mp4")
+    print("OpenCV opened:", cap.isOpened())
+    cap.release()
 
-    object_dict = {}
-    frame_dict = {}
-    ball_pos_dict = {}
-    wrist_pos_dict = {}
-    arm_pos_dict = {}
-    shoulder_pos_dict = {}
+    pose_results = analyze.model("uploaded_video.mp4", stream=True)
+    hoop_results = analyze.hoop_model("uploaded_video.mp4",
+        stream=True,
+        imgsz=1280,
+        conf=0.05
+    )
+    ball_results = analyze.ball_model("uploaded_video.mp4", stream=True)
 
     for frame_num, result in enumerate(pose_results):
         frame_dict[frame_num] = result
@@ -171,34 +180,92 @@ async def analyze_videos(vids: UploadFile = File(...)):
 @app.post("/annotated-vid")
 async def annotated_vid(vids: UploadFile = File(...)):
     if not vids.content_type.startswith("video/"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File uploaded is not a video. Got: {vids.content_type}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File uploaded is not a video. Got: {vids.content_type}"
+        )
 
-    with open("uploaded_video.mp4", "wb") as buffer:
+    if release_frame is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Analyze a video first to determine the release frame"
+        )
+
+    with open("uploaded_annotation_video.mp4", "wb") as buffer:
         shutil.copyfileobj(vids.file, buffer)
 
-    cap = cv2.VideoCapture("uploaded_video.mp4")
+    pose_results = analyze.model("uploaded_annotation_video.mp4", stream=True)
 
-    if (cap.isOpened()== False):
-        print("Error opening video stream or file")
+    cap = cv2.VideoCapture("uploaded_annotation_video.mp4")
+
+    if not cap.isOpened():
+        raise HTTPException(status_code=422, detail="Could not open video")
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    out = cv2.VideoWriter(
+        "annotated_video.mp4",
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        fps,
+        (width, height)
+    )
+
+    if not out.isOpened():
+        cap.release()
+        raise HTTPException(status_code=500, detail="Could not create output video")
+
+    pose_iter = iter(pose_results)
 
     while cap.isOpened():
-
         ret, frame = cap.read()
 
-        if ret == True:
-
-            for frame_num, result in enumerate(pose_results):
-                for pair in POSE_PAIRS:
-                    partA = pair[0]
-                    partB = pair[1]
-
-                if result.keypoints.xy[partA] and result.keypoints.xy[partB]:
-                    cv2.line(pose_results[frame_num], result.keypoints.xy[partA], result.keypoints.xy[partB], (0, 255, 0), 3)
-    
-        else:
+        if not ret:
             break
 
+        try:
+            result = next(pose_iter)
+            print("Keypoints:", result.keypoints.xy.shape if result.keypoints is not None else None)
+            if result.keypoints is not None and len(result.keypoints.xy) > 0:
+                print("Keypoints:", result.keypoints.xy[0].tolist())
+        except StopIteration:
+            break
+
+        if result.keypoints is not None and len(result.keypoints.xy) > 0:
+            keypoints = result.keypoints.xy[0].cpu().numpy() 
+
+            for partA, partB in POSE_PAIRS:
+                pointA = tuple(map(int, keypoints[partA]))
+                pointB = tuple(map(int, keypoints[partB]))
+
+                if pointA != (0, 0) and pointB != (0, 0):
+                    cv2.line(frame, pointA, pointB, (0, 255, 0), 4)
+                    cv2.circle(frame, pointA, radius=6, color=(0, 0, 255), thickness=-1)
+                    cv2.circle(frame, pointB, radius=6, color=(0, 0, 255), thickness=-1)
+                cv2.putText(
+                    frame,
+                    "TEST",
+                    (100, 100),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    2,
+                    (0, 255, 0),
+                    4
+                )
+        out.write(frame)
+
+    cap.release()
+    out.release()
+    release_keypoint = frame_dict[release_frame-2].keypoints.xy[0].cpu().numpy()
+    shooting_hand = analyze.shooting_hand(release_frame, wrist_pos_dict)
+    elbow_angle = analyze.elbow_angle(release_keypoint, shooting_hand)
+
+    return {
+        "message": "Annotated video saved", 
+        "file": "annotated_video.mp4",
+        "shooting_hand": shooting_hand,
+        "elbow_angle": elbow_angle,
+    }
 
 @app.post("/report")
 async def analysis_report():
