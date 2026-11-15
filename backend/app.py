@@ -1,4 +1,5 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, status
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status
+from typing import Literal
 import shutil
 from pydantic import BaseModel, Field
 import analyze
@@ -178,7 +179,7 @@ async def analyze_videos(vids: UploadFile = File(...)):
     }
 
 @app.post("/annotated-vid")
-async def annotated_vid(vids: UploadFile = File(...)):
+async def annotated_vid(vids: UploadFile = File(...), hand: Literal["left", "right"] | None = Form(None)):
     if not vids.content_type.startswith("video/"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -217,7 +218,23 @@ async def annotated_vid(vids: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail="Could not create output video")
 
     pose_iter = iter(pose_results)
-
+    shooting_hand = analyze.ShootingHand[hand.upper()] if hand else analyze.find_shooting_hand(release_frame, ball_pos_dict, wrist_pos_dict)
+    elbow_frames = []
+    for frame_num in sorted(person_pos_dict):
+        if max(0, release_frame - int(fps * 0.5)) <= frame_num <= release_frame - 4:
+            angle = analyze.elbow_angle(person_pos_dict[frame_num].cpu().numpy(), shooting_hand)
+            if angle is not None and angle > 0:
+                elbow_frames.append((frame_num, angle))
+    if not elbow_frames:
+        cap.release()
+        out.release()
+        raise HTTPException(status_code=422, detail="Could not measure the elbow before release")
+    # Use the last bent-arm position before the arm extends toward release.
+    set_frames = [elbow_frames[i] for i in range(1, len(elbow_frames) - 1)
+                  if elbow_frames[i][1] <= min(elbow_frames[i-1][1], elbow_frames[i+1][1])]
+    elbow_frame, elbow_angle = set_frames[-1] if set_frames else min(elbow_frames, key=lambda item: item[1])
+    elbow_text = f"{elbow_angle:.1f} deg" if elbow_angle is not None else "N/A"
+    shoulder_idx, elbow_idx, wrist_idx = (6, 8, 10) if shooting_hand == analyze.ShootingHand.RIGHT else (5, 7, 9)
     while cap.isOpened():
         ret, frame = cap.read()
 
@@ -243,28 +260,36 @@ async def annotated_vid(vids: UploadFile = File(...)):
                     cv2.line(frame, pointA, pointB, (0, 255, 0), 4)
                     cv2.circle(frame, pointA, radius=6, color=(0, 0, 255), thickness=-1)
                     cv2.circle(frame, pointB, radius=6, color=(0, 0, 255), thickness=-1)
-                cv2.putText(
-                    frame,
-                    "TEST",
-                    (100, 100),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    2,
-                    (0, 255, 0),
-                    4
-                )
+            shoulder, elbow, wrist = keypoints[[shoulder_idx, elbow_idx, wrist_idx]]
+            current_angle = analyze.elbow_angle(keypoints, shooting_hand)
+            if current_angle is not None and all(point.any() for point in (shoulder, elbow, wrist)):
+                center = tuple(map(int, elbow))
+                upper_arm, forearm = shoulder - elbow, wrist - elbow
+                start = math.degrees(math.atan2(upper_arm[1], upper_arm[0]))
+                end = math.degrees(math.atan2(forearm[1], forearm[0]))
+                sweep = (end - start + 180) % 360 - 180
+                radius = max(8, int(min(math.hypot(*upper_arm), math.hypot(*forearm)) * 0.3))
+                cv2.line(frame, center, tuple(map(int, shoulder)), (0, 255, 255), 4)
+                cv2.line(frame, center, tuple(map(int, wrist)), (0, 255, 255), 4)
+                cv2.ellipse(frame, center, (radius, radius), 0,
+                            min(start, start + sweep), max(start, start + sweep), (0, 255, 255), 4)
+                cv2.putText(frame, f"{current_angle:.1f} deg", (center[0] + 30, center[1] - 25),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
+        cv2.putText(frame, f"Shooting hand: {shooting_hand.name.title()}",
+                    (100, 100), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 4)
+        cv2.putText(frame, f"Elbow (set, frame {elbow_frame}): {elbow_text}",
+                    (100, 180), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 4)
         out.write(frame)
 
     cap.release()
     out.release()
-    release_keypoint = frame_dict[release_frame-2].keypoints.xy[0].cpu().numpy()
-    shooting_hand = analyze.shooting_hand(release_frame, wrist_pos_dict)
-    elbow_angle = analyze.elbow_angle(release_keypoint, shooting_hand)
 
     return {
         "message": "Annotated video saved", 
         "file": "annotated_video.mp4",
         "shooting_hand": shooting_hand,
         "elbow_angle": elbow_angle,
+        "elbow_frame": elbow_frame,
     }
 
 @app.post("/report")
