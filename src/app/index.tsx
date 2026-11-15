@@ -1,5 +1,5 @@
 import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { ThemeContext } from '@/components/switch-theme';
 import { ThemedText } from '@/components/themed-text';
@@ -7,10 +7,7 @@ import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import * as ImagePicker from 'expo-image-picker';
 import { FileInput } from 'lucide-react-native';
 import { useContext, useState } from 'react';
-import { Text, View } from 'react-native-reanimated/lib/typescript/Animated';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
-const [image, setImage] = useState<any | null>(null);
 
 function getDevMenuHint() {
   if (Platform.OS === 'web') {
@@ -31,30 +28,32 @@ function getDevMenuHint() {
   );
 }
 
-const onChange = async () => {
-  const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-  if (!permissionResult.granted) {
-    console.error('Permission required', 'Permission to access the media library is required.');
-    return;
-  }
-
-  let result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ['images', 'videos'],
-    allowsEditing: true,
-    aspect: [4, 3],
-    quality: 1,
-  });
-
-  console.log(result);
-
-  if (!result.canceled) {
-    setImage(result.assets[0].uri);
-
-  }
-}
-
 export default function HomeScreen() {
+  const [, setImage] = useState<string | null>(null);
+
+  const onChange = async () => {
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permissionResult.granted) {
+      console.error('Permission required', 'Permission to access the media library is required.');
+      return;
+    }
+
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images', 'videos'],
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 1,
+    });
+
+    console.log(result);
+
+    if (!result.canceled) {
+      setImage(result.assets[0].uri);
+
+    }
+  }
+
   const themeColor = useContext(ThemeContext);
   const backgroundColorDetector = () => { return themeColor === true ? 'white' : 'black' };
   const backgroundColor = backgroundColorDetector();

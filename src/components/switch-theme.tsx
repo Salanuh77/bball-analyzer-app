@@ -1,7 +1,6 @@
 import { Moon, Sun } from 'lucide-react-native';
 import { createContext, useState } from "react";
-import { Switch } from "react-native";
-import { View } from "react-native-reanimated/lib/typescript/Animated";
+import { Switch, View } from "react-native";
 
 interface Theme {
     theme: 'dark' | 'light';
