@@ -8,10 +8,12 @@ import asyncio
 import cv2
 import os
 import requests
+import numpy as np
 
 app = FastAPI()
 
 release_frame = None
+optimal_angle = None
 
 object_dict = {}
 frame_dict = {}
@@ -45,7 +47,7 @@ POSE_PAIRS = [
 
 @app.post("/videos") 
 async def analyze_videos(vids: UploadFile = File(...)):
-    global release_frame
+    global release_frame, optimal_angle
     if not vids.content_type.startswith("video/"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"File uploaded is not a video. Got: {vids.content_type}")
@@ -235,6 +237,41 @@ async def annotated_vid(vids: UploadFile = File(...), hand: Literal["left", "rig
     elbow_frame, elbow_angle = set_frames[-1] if set_frames else min(elbow_frames, key=lambda item: item[1])
     elbow_text = f"{elbow_angle:.1f} deg" if elbow_angle is not None else "N/A"
     shoulder_idx, elbow_idx, wrist_idx = (6, 8, 10) if shooting_hand == analyze.ShootingHand.RIGHT else (5, 7, 9)
+    release_angle = abs(analyze.ball_trajectory_arc(release_frame, ball_pos_dict))
+    release_point = tuple(map(int, ball_pos_dict[release_frame]))
+    hoop_frame = min(hoop_pos_dict, key=lambda f: abs(f - release_frame))
+    hoop_x, hoop_y = hoop_pos_dict[hoop_frame][:2]
+    horizontal_distance = abs(hoop_x - release_point[0])
+    direction = 1 if hoop_x >= release_point[0] else -1
+    slope = math.tan(math.radians(optimal_angle))
+    # Project the existing optimal launch angle as a parabola ending at the rim.
+    curvature = (hoop_y - release_point[1] + slope * horizontal_distance) / max(horizontal_distance ** 2, 1)
+    optimal_points = []
+    for i in range(101):
+        travel = horizontal_distance * i / 100
+        optimal_points.append((int(release_point[0] + direction * travel),
+                               int(release_point[1] - slope * travel + curvature * travel ** 2)))
+    flight_frames = sorted(f for f in ball_pos_dict if f >= release_frame
+                           and 0 <= direction * (ball_pos_dict[f][0] - release_point[0]) <= horizontal_distance)
+    times = np.array(flight_frames, dtype=float) - release_frame
+    positions = np.array([ball_pos_dict[f] for f in flight_frames])
+    if len(flight_frames) < 3 or not np.any(times):
+        cap.release()
+        out.release()
+        raise HTTPException(status_code=422, detail="Need at least 3 ball detections during flight")
+    # One fixed fit fills missed detections without redrawing a different curve each frame.
+    velocity_x = float(np.linalg.lstsq(times[:, None], positions[:, 0] - release_point[0], rcond=None)[0][0])
+    velocity_y, gravity = np.linalg.lstsq(np.column_stack((times, times ** 2)),
+                                         positions[:, 1] - release_point[1], rcond=None)[0]
+    flight_duration = horizontal_distance / max(direction * velocity_x, 1)
+    trajectory_end_frame = release_frame + math.ceil(flight_duration)
+    curve_times = np.linspace(0, flight_duration, 241)
+    shot_points = np.column_stack((release_point[0] + velocity_x * curve_times,
+                                  release_point[1] + velocity_y * curve_times + gravity * curve_times ** 2))
+    shot_points = np.rint(shot_points).astype(np.int32)
+    optimal_points = np.array(optimal_points, dtype=np.int32)
+    frame_num = 0
+
     while cap.isOpened():
         ret, frame = cap.read()
 
@@ -275,11 +312,24 @@ async def annotated_vid(vids: UploadFile = File(...), hand: Literal["left", "rig
                             min(start, start + sweep), max(start, start + sweep), (0, 255, 255), 4)
                 cv2.putText(frame, f"{current_angle:.1f} deg", (center[0] + 30, center[1] - 25),
                             cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
+        if release_frame <= frame_num <= trajectory_end_frame:
+            progress = min(1.0, (frame_num - release_frame) / max(flight_duration, 1))
+            shot_count = 1 + round(progress * (len(shot_points) - 1))
+            optimal_count = 1 + round(progress * (len(optimal_points) - 1))
+            cv2.polylines(frame, [optimal_points[:optimal_count]], False, (255, 0, 255), 6, cv2.LINE_AA)
+            cv2.polylines(frame, [shot_points[:shot_count]], False, (255, 255, 0), 6, cv2.LINE_AA)
+            cv2.circle(frame, tuple(map(int, shot_points[shot_count - 1])), 18, (255, 255, 0), 4)
+            cv2.circle(frame, release_point, 10, (255, 255, 255), -1)
+        cv2.putText(frame, f"Fitted shot: {release_angle:.1f} deg",
+                    (max(100, width - 1200), 100), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 0), 4)
+        cv2.putText(frame, f"Optimal guide: {optimal_angle:.1f} deg",
+                    (max(100, width - 1200), 180), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 0, 255), 4)
         cv2.putText(frame, f"Shooting hand: {shooting_hand.name.title()}",
                     (100, 100), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 4)
         cv2.putText(frame, f"Elbow (set, frame {elbow_frame}): {elbow_text}",
                     (100, 180), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 4)
         out.write(frame)
+        frame_num += 1
 
     cap.release()
     out.release()
@@ -290,6 +340,7 @@ async def annotated_vid(vids: UploadFile = File(...), hand: Literal["left", "rig
         "shooting_hand": shooting_hand,
         "elbow_angle": elbow_angle,
         "elbow_frame": elbow_frame,
+        "trajectory_end_frame": trajectory_end_frame,
     }
 
 @app.post("/report")
