@@ -22,3 +22,8 @@ python -m compileall -q backend
 ```
 
 The full `backend/test.py` video test is separate: it needs a running local backend, the sample video and trained model weights. CI does not download or execute those models.
+
+
+# TO BE DONE:
+ - Frontend UI for IOS & Android in React Native
+ - Store user data in cloud database (AWS Terraform)
